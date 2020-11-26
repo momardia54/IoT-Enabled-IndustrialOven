@@ -1,24 +1,3 @@
-/*
- * Autheur :           Momar DIA
- * Date:               2020/04/17
- * Modified:           .
- * License:            Ce programme est la propriété intellectuelle de Momar DIA et en aucun cas ne peut être dupliqué ni réutilise sans son autorisation.
- * Description:        Ce programme permet la communication en WiFi avec le serveur. Il recoit l'etat du four from le module principale par Serial2 et l'envoie 
-                       au serveur par modbus ip puis retransmet les commandes du serveur au module principale par le port serial2. s'il n'y a pas de commande, il
-                       envoie FAULT qui est une valeur par défaut 4000 qui signifi dans notre code null ou pas de valeur.
-                       Seulement les HOLDING registeurs sont utilisés dans notre cas car modubus Wifi support un type de registre à la fois
-
-Analog values are 16 bit unsigned words stored with a range of 0-32767
-Digital values are stored as bytes, a zero value is OFF and any nonzer value is ON
-
-It is best to configure registers of like type into contiguous blocks.  this
-allows for more efficient register lookup and and reduces the number of messages
-required by the master to retrieve the data
-*/
-
-
-
-/*---------------- BIBLIOTHEQUES -------------------*/
 #include <ModbusIP>
 #include <Comm.h>
 #include <Modbus.h>
@@ -26,52 +5,37 @@ required by the master to retrieve the data
 
 
 
-
-
-/*---------------- VARIABLES -------------------*/
-const uint16_t FAULT = 4000;                                            // Command value to replace de NULL Value cause Simple comme does not accept NULL and replace it with 0
+const uint16_t FAULT = 4000;                                           
 Packet packet;
-ModbusIP mb;                                                            // Etats et commandes du four
-Semaphore xSerial2Semaphore;                                            // Permet que 2 tâches communiquent pas en même temps avec le module principale
+ModbusIP mb;                                                            
 
-
-/*------------------- Tasks ------------------------*/
-Task TaskReceive_State;                                          // Receive the state of the oven from the main module
-Task TaskModbus_WiFi;                                            // Communicate Modbus with the server and send the Command to the main board
-Task TaskCheck_WiFi;                                             // Check the status of the WiFi connection. If not connecter, try to reconnect it
+Task Receive_State;                                         
+Task Modbus_WiFi;                                           
+Task Check_WiFi;                                            
 
 
 
 
-
-/*---------------- TYPE DEFINITION -------------------*/
 typedef struct {                                      
-  uint16_t tension;                                    //             //
-  uint16_t porte;                                      //             //
-  uint16_t elementChauffant;                           //             //
-  uint16_t ventilation;                                // ETAT DU FOUR//
-  uint16_t temp_Control;                              //             //
-  uint16_t temp_OverHeat;                             //             //
-  uint16_t consigne;                                  //             //
-  uint16_t marge;                                     //             //
+  uint16_t tension;                               
+  uint16_t porte;                                    
+  uint16_t elementChauffant;                        
+  uint16_t ventilation;                             
+  uint16_t temp_Control;                             
+  uint16_t temp_OverHeat;                             
+  uint16_t consigne;                               
+  uint16_t marge;                                     
 } State;  
 
 typedef struct {
-  uint16_t consigne;                                  // COMMANDES  //
-  uint16_t marge;                                     //     DU     //
-  uint16_t onOff;                                      //   MODULE   // 
-  uint16_t alarm;                                      //    WIFI    //
+  uint16_t consigne;                              
+  uint16_t marge;                                  
+  uint16_t onOff;                                  
+  uint16_t alarm;                         
 } Command;
 
 
 
-
-// C'est le mapping des holding registers dans le scada en commençant par 0
-// Certains Scada commencent pas 1 donc être attentif en conséquence 
-/*------------------- Indexs -----------------------*/
-// IO for read and write 
-// I for write 
-// O for Read
   const int Otension = 0;
   const int Oporte = 1;
   const int OelementChauffant = 2;
@@ -90,73 +54,66 @@ typedef struct {
 
 
 
-
-/*------------------- TASKS -----------------------*/
   void Receive_State( void * pvParameters );
   void Modbus_WiFi( void * pvParameters );
   void Check_WiFi( void * pvParameters );
 
-//   Wifi bureau "TecnickromeBureau", "net1516cet"
-
-/*------------------- Setup, run only at the start -----------------------*/
 void setup() {
   delay(10000);
-  Serial.begin(600);                                                           // Initialize serial for debugging
-  Serial2.begin(600);                                                          // Initialize serial 2 for com with main board
-  SimpleComm.begin();                                                           // Initialize com protocol with main board
-  Serial.println(F("esp32 started"));
-  mb.config("IOT", "");                                      // configuration du modbus et connection au WiFi
+  Serial.begin(600);                                                      
+  Serial2.begin(600);                                                      
+  Comm.begin();                   
+  mb.config("IOT", "");                        
   delay(5000);
-  /*--- Modbus INITIALISATION ---*/
-  mb.addHreg(Otension, FAULT);
-  mb.addHreg(Oporte, FAULT);
-  mb.addHreg(OelementChauffant, FAULT);
-  mb.addHreg(Oventilation, FAULT);
-  mb.addHreg(OtempControl, FAULT);
-  mb.addHreg(OtempOverHeat, FAULT);
-  mb.addHreg(Oconsigne, FAULT);
-  mb.addHreg(Omarge, FAULT);
-  mb.addHreg(Iconsigne, FAULT);
-  mb.addHreg(Imarge, FAULT);
-  mb.addHreg(IOnOff, FAULT);
-  mb.addHreg(IAlarm, FAULT);
+  
+  
+  mb.add(Otension, FAULT);
+  mb.add(Oporte, FAULT);
+  mb.add(OelementChauffant, FAULT);
+  mb.add(Oventilation, FAULT);
+  mb.add(OtempControl, FAULT);
+  mb.add(OtempOverHeat, FAULT);
+  mb.add(Oconsigne, FAULT);
+  mb.add(Omarge, FAULT);
+  mb.add(Iconsigne, FAULT);
+  mb.add(Imarge, FAULT);
+  mb.add(IOnOff, FAULT);
+  mb.add(IAlarm, FAULT);
 
-  /*--- Semaphore Initialization ---*/
-  if ( xSerial2Semaphore == NULL )  // Check to confirm that the Serial Semaphore has not already been created.
+  if ( Semaphore == NULL 
   {
-    xSerial2Semaphore = xSemaphoreCreateMutex();  // Create a mutex semaphore we will use to manage the Serial Port
-    if ( ( xSerial2Semaphore ) != NULL )
-      xSemaphoreGive( ( xSerial2Semaphore ) );  // Make the Serial Port available for use, by "Giving" the Semaphore.
+    Semaphore = SemaphoreCreate();  
+    if ( ( Semaphore ) != NULL )
+      SemaphoreGive( ( Semaphore ) );  
   }
-  /*--- TASK INITIALISATION ---*/
-  xTaskCreateTask(
-             Modbus_WiFi,  /* Task function. */
-             "TaskModbus_WiFi",    /* name of task. */
-             1,      /* Stack size of task */
-             NULL,       /* parameter of the task */
-             2,          /* priority of the task */
-             &TaskModbus_WiFi,     /* Task handle to keep track of created task */
-             1);         /* pin task to core 0 */
+  Create(
+             Modbus_WiFi,
+             "Modbus_WiFi",  
+             1,    
+             NULL,    
+             2,   
+             &Modbus_WiFi,   
+             1);   
 
 
-  xTaskCreateTask(
-             Check_WiFi,  /* Task function. */
-             "Check_WiFi",    /* name of task. */
-             1,      /* Stack size of task */
-             NULL,       /* parameter of the task */
-             1,          /* priority of the task */
-             &TaskCheck_WiFi,     /* Task handle to keep track of created task */
-             1);         /* pin task to core 0 */
+  Create(
+             Check_WiFi,  
+             "Check_WiFi",  
+             1,     
+             NULL,   
+             1,     
+             &Check_WiFi,    
+             1);       
 
 
-  xTaskCreateTask(
-             Receive_State,  /* Task function. */
-             "Receive_State",    /* name of task. */
-             1,      /* Stack size of task */
-             NULL,       /* parameter of the task */
-             1,          /* priority of the task */
-             &TaskReceive_State,     /* Task handle to keep track of created task */
-             0);         /* pin task to core 0 */
+  Create(
+             Receive_State
+             "Receive_State",  
+             1,      
+             NULL,    
+             1,       
+             &Receive_State,   
+             0);     
 Serial.println(F("Setup Successful !! "));
 
 } 
@@ -168,45 +125,37 @@ Serial.println(F("Setup Successful !! "));
 
 
 void loop() {
-  // Vide les choses se passent dans les tâches
+ 
 }
 
 
 
-
-
-
-/*------------------- Receive State from main module(TASK) -----------------------*/
 void Receive_State( void * pvParameters ){
   
   for(;;)
   {
-    //taskDISABLE_INTERRUPTS();
-    Serial.println(F("                                                              Receive_State"));
 
-    if ( xSemaphoreTake( xSerial2Semaphore, ( TickType_t ) 5 ) == pdTRUE )
+    if ( SemaphoreTake( Semaphore, ( TickType_t ) 5 ) == pdTRUE )
     {
           
           
             if (state != nullptr) {
-                mb.Hreg(Otension, state->tension);
-                mb.Hreg(Oporte, state->porte);
-                mb.Hreg(OelementChauffant, state->elementChauffant);
-                mb.Hreg(Oventilation, state->ventilation);
-                mb.Hreg(OtempControl, state->temp_Control);
-                mb.Hreg(OtempOverHeat, state->temp_OverHeat);
-                mb.Hreg(Oconsigne, state->consigne);
-                mb.Hreg(Omarge, state->marge);
-                // Print received data
+                mb.set(Otension, state->tension);
+                mb.set(Oporte, state->porte);
+                mb.set(OelementChauffant, state->elementChauffant);
+                mb.set(Oventilation, state->ventilation);
+                mb.set(OtempControl, state->temp_Control);
+                mb.set(OtempOverHeat, state->temp_OverHeat);
+                mb.set(Oconsigne, state->consigne);
+                mb.set(Omarge, state->marge);
                 Serial.print("  temp ");
                 Serial.print(mb.Hreg(OtempOverHeat));
             
             
           }
-          xSemaphoreGive( xSerial2Semaphore ); // Now free or "Give" the Serial Port for others.
+          SemaphoreGive( Semaphore ); 
         }
-     // taskENABLE_INTERRUPTS();
-      vTaskDelay(900 / portTICK_PERIOD_MS);
+      Delay(900 / PERIOD_MS);
     }
 
 }
@@ -215,60 +164,47 @@ void Receive_State( void * pvParameters ){
 
 
 
-
-
-
-/*------------------- Check Wifi Connection(TASK) -----------------------*/
 void Check_WiFi( void * pvParameters ){
   
   for(;;){
-      Serial.println("                                                              Check_WiFi");
       if (WiFi.status() != WL_CONNECTED) {
           Serial.println(F(" Wifi Not connected "));
-          ESP.restart();
+          restart();
           }                
-    vTaskDelay(60000 / portTICK_PERIOD_MS);                                               // délais d'execution 10min
+    Delay(60000 / portTICK_PERIOD_MS);                          
     }
 }
 
 
 
 
-
-
-/*------------------- Communicate modbus with the server(TASK) -----------------------*/
 void Modbus_WiFi( void * pvParameters ){
   Command command;
   
   for(;;)
   {
     
-      //taskDISABLE_INTERRUPTS();
-      Serial.println(F("                                                              Modbus_WiFi"));
-      Serial.println(xPortGetFreeHeapSize());
-      mb.task();                                                                          // Where the Magic modbus happens
+      mb.execute();                                                                      
       delay(50);
       
       
-      if ( xSemaphoreTake( xSerial2Semaphore, ( TickType_t ) 5 ) == pdTRUE )
+      if ( SemaphoreTake( Semaphore, ( TickType_t ) 5 ) == pdTRUE )
     {
-        command.consigne = mb.Hreg(Iconsigne);
-        command.marge = mb.Hreg(Imarge);
-        command.onOff = mb.Hreg(IOnOff);
-        command.alarm = mb.Hreg(IAlarm);
-        packet.setData(&command, sizeof(command));                                        // prepare the command
+        command.consigne = mb.set(Iconsigne);
+        command.marge = mb.set(Imarge);
+        command.onOff = mb.set(IOnOff);
+        command.alarm = mb.set(IAlarm);
+        packet.setData(&command, sizeof(command));                                      
     
-        // Send packet
-        SimpleComm.send(Serial2, packet, 0);                                              // send command to the main module
+        Comm.send(Serial2, packet, 0);                                       
 
-      xSemaphoreGive( xSerial2Semaphore ); // Now free or "Give" the Serial Port for others.
+      xSemaphoreGive( xSerial2Semaphore ); 
     }
-    mb.Hreg(Iconsigne, FAULT);                                                            // peut the value to null to avoid keep sending value if there is no command
-    mb.Hreg(Imarge, FAULT);
-    mb.Hreg(IOnOff, FAULT);
-    mb.Hreg(IAlarm, FAULT);
-      //taskENABLE_INTERRUPTS();
-      vTaskDelay(1000 / portTICK_PERIOD_MS);                     // délais d'execution
+    mb.set(Iconsigne, FAULT);                                                         
+    mb.set(Imarge, FAULT);
+    mb.set(IOnOff, FAULT);
+    mb.set(IAlarm, FAULT);
+    Delay(1000 / PERIOD_MS);              
       
   }
 }
