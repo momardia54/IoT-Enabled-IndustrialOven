@@ -1,33 +1,3 @@
-/*
- * Autheur :           Momar DIA
- * Date:               2020/04/115
- * Modified:           .
- * Description:        Ceci est le programme embarqué du contrôleur des fours. Ce programme contrôle la temperature du four et envoie des informations
-                    sur l'êtat des fours au Scada qui se trouve sur le serveur de la compagnie par protocol modbus WiFi, en même temps ce programme
-                    envoie les mêmes informations au Scada du Touchberry par modbus Ethernet. Ce programme exécute les commandes reçues des Scada
- * Nomenclarture Spéciale : 
-    - 21 = thermocouple control select pin
-    - 22 = thermocouple overheat select pin
-    - 50 = SO PIN
-    - 51 = SI PIN
-    - 52 = SCK PIN
-
-modbus registers follow the following format
-00001-09999  Digital Outputs, A master device can read and write to these registers
-10001-19999  Digital Inputs, A master device can only read the values from these registers
-30001-39999  Analog Inputs, A master device can only read the values from these registers
-40001-49999  Analog Outputs, A master device can read and write to these registers 
-
-Analog values are 16 bit unsigned words stored with a range of 0-32767
-Digital values are stored as bytes, a zero value is OFF and any nonzer value is ON
-
-It is best to configure registers of like type into contiguous blocks.  this
-allows for more efficient register lookup and and reduces the number of messages
-required by the master to retrieve the data
-*/
-
-
-/*---------------- BIBLIOTHEQUES -------------------*/
 #include <Adafruit>
 #include <Arduino_Fre.h>
 #include <RegBank.h>
@@ -44,13 +14,13 @@ required by the master to retrieve the data
 
 
 typedef struct {                                      
-  uint16_t tension;                                    //             //
-  uint16_t porte;                                      //             //
-  uint16_t elementChauffant;                           //             //
+  uint16_t tension;                      
+  uint16_t porte;                               
+  uint16_t elementChauffant;                        
   uint16_t ventilation;                         
-  uint16_t temp_Control;                              //             //
-  uint16_t temp_OverHeat;                             //             //
-  uint16_t consigne;                                  //             //
+  uint16_t temp_Control;                             
+  uint16_t temp_OverHeat;                          
+  uint16_t consigne;                                  
   uint16_t marge;                                    
 } State;  
 
@@ -87,12 +57,12 @@ const String ConfigurationFile = "config.txt";
 const char *filename = "config.txt";  
 Adafruit_MAX31856 thermoControl = Adafruit_MAX31856(21);             
 Adafruit_MAX31856 thermoOverHeat = Adafruit_MAX31856(20);             
-modbusDevice regBank;                                                        
-modbusSlave slave;                                                
+Device Bank;                                                        
+Slave slave;                                                
 double Setpoint, Input, Output, Kp, Ki, Kd;                        
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, DIRECT);             
 const uint16_t FAULT = 4000;
-SemaphoreHandle_t xWiFiSemaphore;                                           
+Semaphore WiFiSemaphore;                                           
 double TempControl;                                                      
 double TempOverHeat;                                                  
 
@@ -104,13 +74,6 @@ void Receive_Command( void *pvParameters );
 
 
 
-
-
-
-/*------------------- INDEXS -----------------------*/
-// IO for read and write 
-// I for write
-// O for Read
 const int Otension =           10001;                                       
 const int Oporte =             10002;                        
 const int OelementChauffant =  10003;                            
@@ -138,7 +101,7 @@ void setup() {
   Serial.begin(600);                                                    
 
                                                    
-  slave._device = &regBank;                                             
+  slave._device = &Bank;                                             
   slave._device->setId(1);
   slave.setPort(&RS485);                                              
   slave.setBaud(9600);                                                           
@@ -149,22 +112,17 @@ void setup() {
   Wifi.begin(9600);                                                                 
 
 
-  if ( xWiFiSemaphore == NULL )                                                
+  if ( Semaphore == NULL )                                                
   {
-    xWiFiSemaphore = xSemaphoreCreateMutex();                                    
-    if ( ( xWiFiSemaphore ) != NULL )
-      xSemaphoreGive( ( xWiFiSemaphore ) );                                    
+    Semaphore = CreateMutex();                                    
+    if ( ( WiFiSemaphore ) != NULL )
+      SemaphoreGive( ( WiFiSemaphore ) );                                    
   }
   
-  /*--- TASKS INITIALISATION ---*/
-  xTaskCreate(PID_Control, "ControlTemp", 200, NULL  , 3, &PID_Handle);
-  xTaskCreate(Receive_Command, "Receive_Command", 500, NULL, 2, NULL);
-  xTaskCreate(Modbus, "Modbus_RTU", 1500, NULL, 3, NULL);
-  xTaskCreate(Send_State, "WiFi_COM", 500, NULL, 2, NULL);
-  if(lastConfig[elChauffants])
-   {
-       digitalWrite(R1_1, HIGH);
-   }
+  Create(PID_Control, "ControlTemp", 200, NULL  , 3, &PID_Handle);
+  Create(Receive_Command, "Receive_Command", 500, NULL, 2, NULL);
+  Create(Modbus, "Modbus_RTU", 1500, NULL, 3, NULL);
+  Create(Send_State, "WiFi_COM", 500, NULL, 2, NULL);
   delay(5000);                                                                  
   Serial.println(F("Setup Executé avec succes..."));
 }
@@ -173,15 +131,11 @@ void setup() {
 
 
 void loop() {
-  // Vide les choses se passent dans les tâches
 }
 
 
 
 
-
-
-/*------------------- LIRE TEMPERATURE Thermocouple control(FUNCTION) -----------------------*/
 void LireTemperatureControl()
 {
     TempControl = thermoControl.readThermocoupleTemperature();                             
@@ -201,7 +155,7 @@ void LireTemperatureOverHeat()
     TempOverHeat = (TempOverHeat * 1.8) + 32;
     if(TempOverHeat < 0 || TempOverHeat > 2000)
     {
-      TempOverHeat = thermoOverHeat.readThermocoupleTemperature();                              // Lecture de la temperatue en degre celcius
+      TempOverHeat = thermoOverHeat.readThermocoupleTemperature();                           
       TempOverHeat = (TempControl * 1.8) + 32; 
     }
     TempOverHeat = TempOverHeat + regBank.get(IOOffsetOvHeatPlus) - regBank.get(IOOffsetOvHeatMoins);
@@ -216,7 +170,6 @@ void PID_Control(void *pvParameters)
   (void) pvParameters;
   for (;;)
   {
-    //taskDISABLE_INTERRUPTS();
     if(digitalRead(I0_0))                  
     {
       if(myPID.GetMode() == AUTOMATIC)        
@@ -228,9 +181,9 @@ void PID_Control(void *pvParameters)
       }
       else
       {
-          myPID.SetMode(AUTOMATIC);           // Allumer le PID 
+          myPID.SetMode(AUTOMATIC);    
           Input = TempControl;
-          myPID.Compute();                   // Calculer si une nouvelle valeur de OUTPUT est necessaire
+          myPID.Compute();                 
           Serial.print(Output);
           analogWrite(A1_2, Output);
       }
@@ -238,18 +191,18 @@ void PID_Control(void *pvParameters)
     }
     else
     {
-         if(myPID.GetMode() == MANUAL)        // Si le PID est actif
+         if(myPID.GetMode() == MANUAL)   
       {
         analogWrite(A1_2, 0);
       }
       else
       {
-          myPID.SetMode(MANUAL);             // Eteindre le PID
-          analogWrite(A1_2, 0);        // Fermer les éléments chauffants
+          myPID.Set(MANUAL);     
+          analogWrite(A1_2, 0);    
       }
     }
-    //taskENABLE_INTERRUPTS();
-    vTaskDelay(300 / portTICK_PERIOD_MS);  // one tick delay (15ms) 35 = 500ms
+    
+    Delay(300 / PERIOD_MS);
   }
 }
 
@@ -259,11 +212,9 @@ void PID_Control(void *pvParameters)
 
 
 void Modbus( void *pvParameters ){
-  //pinMode(R1_1, OUTPUT);
   pinMode(R2_1, OUTPUT);
   SPI.begin();
   for(;;){
-    //taskDISABLE_INTERRUPTS();
     regBank.set(Otension, digitalRead(I0_0)); 
     regBank.set(Oporte, digitalRead(I0_1)); 
     regBank.set(OelementChauffant, digitalRead(I0_2));
@@ -276,7 +227,6 @@ void Modbus( void *pvParameters ){
     Kd = regBank.get(KD);
     myPID.SetTunings((Kp / 10), (Ki / 10), (Kd / 10));
     slave.run();
-    //taskENABLE_INTERRUPTS();
     vTaskDelay(500 / portTICK_PERIOD_MS);
     }
   }
